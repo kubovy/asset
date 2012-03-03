@@ -42,54 +42,54 @@ class AssetHelper extends Helper {
 		'fixCssImg' => false
 	);
 	
-  //Class for localizing JS files if JS I18N plugin is installed
-  //http://github.com/mcurry/js/tree/master
-  var $Lang = false;
+	//Class for localizing JS files if JS I18N plugin is installed
+	//http://github.com/mcurry/js/tree/master
+	var $Lang = false;
 
-  var $paths = array('wwwRoot' => WWW_ROOT,
-                     'js' => JS,
-                     'css' => CSS);
+	var $paths = array('wwwRoot' => WWW_ROOT,
+		'js' => JS,
+		'css' => CSS);
 
-  var $foundFiles = array();
+	var $foundFiles = array();
 
-  var $helpers = array('Html', 'Javascript');
-  var $viewScriptCount = 0;
-  var $initialized = false;
-  var $js = array();
+	var $helpers = array('Html', 'Javascript');
+	var $viewScriptCount = 0;
+	var $initialized = false;
+	var $js = array();
 	
-  var $css = array();
+	var $css = array();
 	var $assets = array();
 
-  var $View = null;
+	var $View = null;
 
   function __construct($options, $paths=array()) {
 		$this->options = array_merge($this->options, $options);
-    $this->paths = array_merge($this->paths, $paths);
+		$this->paths = array_merge($this->paths, $paths);
 
     $this->View =& ClassRegistry::getObject('view');
-  }
+	}
 
-  //flag so we know the view is done rendering and it's the layouts turn
-  function afterRender() {
-    if ($this->View) {
-      $this->viewScriptCount = count($this->View->__scripts);
-    }
-  }
+	//flag so we know the view is done rendering and it's the layouts turn
+	function afterRender() {
+		if ($this->View) {
+			$this->viewScriptCount = count($this->View->__scripts);
+		}
+	}
 
   function scripts_for_layout($types=array('js', 'css', 'codeblock')) {
-    if (!is_array($types)) {
-      $types = array($types);
-    }
+		if (!is_array($types)) {
+			$types = array($types);
+		}
 
-    if (!$this->initialized) {
-      $this->__init();
-    }
-		
-    //Allow breaking up of js,css,codeblock in your html when debug is > 0
-    //Ex: putting 'css' in head and 'js','codeblock' at bottom before </body>
+		if (!$this->initialized) {
+			$this->__init();
+		}
+
+		//Allow breaking up of js,css,codeblock in your html when debug is > 0
+		//Ex: putting 'css' in head and 'js','codeblock' at bottom before </body>
 		if (Configure::read('debug') && $this->options['debug'] == false) {
 			$scripts_for_layout = array();
-			
+
 			foreach ($this->View->__scripts as $resource) {
 				foreach ($types as $type) {
 					if($type == 'css' || $type == 'js') {
@@ -103,330 +103,354 @@ class AssetHelper extends Helper {
 					}
 				}
 			}
-			
+
 			return join("\n\t", $scripts_for_layout);
 		}
 
-    $scripts_for_layout = array();
+		$scripts_for_layout = array();
 		foreach($this->assets as $asset) {
 			if(!in_array($asset['type'], $types) ) {
 				continue;
 			}
-			
+			$paths = $this->options['cachePaths'];
+
 			switch($asset['type']) {
 				case 'js':
 					$processed = $this->__process($asset['type'], $asset['assets']);
-					$scripts_for_layout[] = $this->Javascript->link('/' . $this->options['cachePaths']['js'] . '/' . $processed);
+					$scripts_for_layout[] = $this->Javascript->link('/' . $paths['js'] . '/' . $processed);
 					break;
 				case 'css':
-					$processed = $this->__process($asset['type'], $asset['assets']);
-					$scripts_for_layout[] = $this->Html->css('/' . $this->options['cachePaths']['css'] . '/' . $processed);
-					break;				
+					$processed = $this->__process($asset['type'], $asset['assets'], $asset['media']);
+					$scripts_for_layout[] = $this->Html->css('/' . $paths['css'] . '/' . $processed, null,array('media' => $asset['media']));
+					break;
 				default:
 					$scripts_for_layout[] = $asset['assets']['script'];
 			}
 		}
 
-    return implode("\n\t", $scripts_for_layout) . "\n\t";
-  }
+		return implode("\n\t", $scripts_for_layout) . "\n\t";
+	}
 
-  function __init() {
-    $this->initialized = true;
+	function __init() {
+		$this->initialized = true;
 		$this->assets = array();
 
-    //nothing to do
-    if (!$this->View->__scripts) {
-      return;
-    }
+		//nothing to do
+		if (!$this->View->__scripts) {
+			return;
+		}
 
-    //move the layout scripts to the front
-    $this->View->__scripts = array_merge(
-                               array_slice($this->View->__scripts, $this->viewScriptCount),
-                               array_slice($this->View->__scripts, 0, $this->viewScriptCount)
-                             );
+		//move the layout scripts to the front
+		$this->View->__scripts = array_merge(
+			array_slice($this->View->__scripts, $this->viewScriptCount),
+			array_slice($this->View->__scripts, 0, $this->viewScriptCount)
+		);
 		if (Configure::read('debug') && $this->options['debug'] == false) {
 			return;
 		}
-		
-    if (App::import('Model', 'Js.JsLang')) {
-      $this->Lang = ClassRegistry::init('Js.JsLang');
-      $this->Lang->init();
-    }
 
-    //split the scripts into js and css
+		if (App::import('Model', 'Js.JsLang')) {
+			$this->Lang = ClassRegistry::init('Js.JsLang');
+			$this->Lang->init();
+		}
+
+		//split the scripts into js and css
 		$slot = 0;
-		$prev = '';
+		$prevType = '';
+		$prevKey = '';
+		$prevMedia = '';
 		$holding = array();
-    foreach ($this->View->__scripts as $i => $script) {
-      if (preg_match('/(src|href)="\/?(.*\/)?(js|css)\/(.*).(js|css)"/', $script, $match)) {
-        $temp = array();
-        $temp['script'] = $match[4];
-        $temp['plugin'] = trim($match[2], '/');
+		foreach ($this->View->__scripts as $i => $script) {
+			if (preg_match('/(src|href)="\/?(.*\/)?(js|css)\/(.*).(js|css)"/', $script, $match)) {
+				$temp = array();
+				$type = $match[5];
+				$temp['script'] = $match[4];
+				$temp['plugin'] = trim($match[2], '/');
+				preg_match('/media="(.*)"/', $script, $match);
+				$media = (isset($match[1]) ? $match[1] : 'all');
+				$media = ($type == 'css' ? $media : null);
 				
-				if($prev != $match[5] && !empty($holding)) {
-					$this->assets[$slot] = array('type' => $prev, 'assets' => $holding);
+				$key = $type . '/' . $media;
+				if ($prevKey != $key && !empty($holding)) {
+					$this->assets[$slot] = array('type' => $prevType, 'assets' => $holding, 'media' => $prevMedia);
 					$holding = array();
-					$slot ++;
+					$slot++;
 				}
-       
+
 				$holding[] = $temp;
-				$prev = $match[5];
-      } else {
-				if(!empty($holding)) {
-					$this->assets[$slot] = array('type' => $prev, 'assets' => $holding);
+				$prevType = $type;
+				$prevMedia = $media;
+				$prevKey = $key;
+			} else {
+				if (!empty($holding)) {
+					$this->assets[$slot] = array('type' => $prevType, 'media' => $prevMedia, 'assets' => $holding);
 					$holding = array();
-					$slot ++;
+					$slot++;
 				}
-				
+
 				$this->assets[$slot] = array('type' => 'codeblock' , 'assets' => array('script' => $script));
 				$slot ++;
-				$prev = 'codeblock';
+				$prevMedia = '';
+				$prevKey = $prevType = 'codeblock';
 			}
-    }
-		
+		}
+
 		if(!empty($holding)) {
-			$this->assets[$slot] = array('type' => $prev, 'assets' => $holding);
+			$this->assets[$slot] = array('type' => $prevType, 'media' => $prevMedia, 'assets' => $holding);
 		}
-  }
+	}
 
-  function __preprocessCss($asset, $buffer) {
-	$originalPath = $asset['script'];
+	function __preprocessCss($asset, $buffer) {
+		$originalPath = $asset['script'];
+		
+		$rootPath = (empty($asset['plugin']) ? '' : ($asset['plugin'] . '/')); 
+		$rootPath .= dirname(CSS_URL.$originalPath);
 
-	$rootPath = dirname(CSS_URL.$originalPath);
+		$matches = array();
+	$results = preg_match_all('#url\([\'"]?([^\'\)]+)[\'"]?\)#i', $buffer, $matches, PREG_SET_ORDER);
 
-	$matches = array();
-	$results = preg_match_all('#url\(\'?([^\'\)]+)\'?\)#i', $buffer, $matches, PREG_SET_ORDER);
+		$replacements = array();
 
-	$replacements = array();
+		foreach ($matches as $match) {
+			if (isset($replacements[$match[1]])) {
+				continue;
+			}
 
-	foreach ($matches as $match) {
-		if (isset($replacements[$match[1]])) {
-			continue;
-		}
-
-		if (substr($match[1], 0, 1) == '/'
-			|| strpos($match[1], 'http://') !== false
-			|| strpos($match[1], 'https://') !== false) {
-			continue;
-		}
+			if (substr($match[1], 0, 1) == '/'
+				|| strpos($match[1], 'http://') !== false
+				|| strpos($match[1], 'https://') !== false) {
+				continue;
+			}
 
 		$normalized = $this->__normalizeImageUrl($rootPath.'/'.$match[1]);
-		$replacements[$match[1]] = Router::url($normalized);
+			$replacements[$match[1]] = Router::url($normalized);
+		}
+
+		return str_replace(array_keys($replacements), array_values($replacements), $buffer);
 	}
 
-	return str_replace(array_keys($replacements), array_values($replacements), $buffer);
-  }
+	function __normalizeImageUrl($url) {
+		$parts = explode('/', $url);
+		$newparts = array();
+		$newpath = '';
 
-  function __normalizeImageUrl($url) {
-	$parts = explode('/', $url);
-	$newparts = array();
-	$newpath = '';
-
-	while (($part = array_shift($parts)) !== NULL) {
-		if ($part === '.' || $part === '') {
-			continue;
-		}
-		if ($part === '..') {
-			if (!empty($newparts)) {
-				array_pop($newparts);
+		while (($part = array_shift($parts)) !== NULL) {
+			if ($part === '.' || $part === '') {
 				continue;
-			} else {
-				return false;
+			}
+			if ($part === '..') {
+				if (!empty($newparts)) {
+					array_pop($newparts);
+					continue;
+				} else {
+					return false;
+				}
+			}
+			$newparts[] = $part;
+		}
+
+		$newpath .= implode('/', $newparts);
+	return '/'.$newpath;
+	}
+
+	function __process($type, $assets) {
+		$path = $this->__getPath($type);
+		$folder = new Folder($this->paths['wwwRoot'] . $this->options['cachePaths'][$type], true);
+
+		//check if the cached file exists
+		//$scripts = Set::extract('/script', $assets);
+		$scripts = array();
+		foreach($assets as $asset) {
+			$scripts[] = (empty($asset['plugin']) ? '' : $asset['plugin'] . '/')
+						. $asset['script'];
+		}
+		$fileName = $folder->find($this->__generateFileName($scripts) . '_([0-9]{10}).' . $type);
+		if ($fileName) {
+			//take the first file...really should only be one.
+			$fileName = $fileName[0];
+		}
+
+		//make sure all the pieces that went into the packed script
+		//are OLDER then the packed version
+		if ($this->options['checkTs'] && $fileName) {
+			$packed_ts = filemtime($this->paths['wwwRoot'] . $this->options['cachePaths'][$type] . DS . $fileName);
+
+			$latest_ts = 0;
+      foreach($assets as $asset) {
+				$assetFile = $this->__findFile($asset, $type);
+				if (!$assetFile) {
+					continue;
+				}
+				$latest_ts = max($latest_ts, filemtime($assetFile));
+			}
+
+			//an original file is newer.  need to rebuild
+			if ($latest_ts > $packed_ts) {
+				unlink($this->paths['wwwRoot'] . $this->options['cachePaths'][$type] . DS . $fileName);
+				$fileName = null;
 			}
 		}
-		$newparts[] = $part;
-	}
 
-	$newpath .= implode('/', $newparts);
-	return '/'.$newpath;
-  }
+		//file doesn't exist.  create it.
+		if (!$fileName) {
+			$ts = time();
+			switch ($type) {
+				case 'js':
+					if (PHP5) {
+						App::import('Vendor', 'jsmin/jsmin');
+					}
+					break;
+				case 'css':
+					App::import('Vendor', 'csstidy', array('file' => 'class.csstidy.php'));
+					$tidy = new csstidy();
+					$tidy->load_template($this->options['cssCompression']);
+					break;
+			}
 
-  function __process($type, $assets) {
-    $path = $this->__getPath($type);
-    $folder = new Folder($this->paths['wwwRoot'] . $this->options['cachePaths'][$type], true);
-
-    //check if the cached file exists
-    $scripts = Set::extract('/script', $assets);
-    $fileName = $folder->find($this->__generateFileName($scripts) . '_([0-9]{10}).' . $type);
-    if ($fileName) {
-      //take the first file...really should only be one.
-      $fileName = $fileName[0];
-    }
-
-    //make sure all the pieces that went into the packed script
-    //are OLDER then the packed version
-    if ($this->options['checkTs'] && $fileName) {
-      $packed_ts = filemtime($this->paths['wwwRoot'] . $this->options['cachePaths'][$type] . DS . $fileName);
-
-      $latest_ts = 0;
+			//merge the script
+			$scriptBuffer = '';
       foreach($assets as $asset) {
-        $assetFile = $this->__findFile($asset, $type);
-        if (!$assetFile) {
-          continue;
-        }
-        $latest_ts = max($latest_ts, filemtime($assetFile));
-      }
+				$buffer = $this->__getFileContents($asset, $type);
+				$origSize = strlen($buffer);
 
-      //an original file is newer.  need to rebuild
-      if ($latest_ts > $packed_ts) {
-        unlink($this->paths['wwwRoot'] . $this->options['cachePaths'][$type] . DS . $fileName);
-        $fileName = null;
-      }
-    }
+				switch ($type) {
+					case 'js':
+						//jsmin only works with PHP5
+						if (PHP5) {
+							//$buffer = trim(JSMin::minify($buffer));
+						}
+						break;
 
-    //file doesn't exist.  create it.
-    if (!$fileName) {
-      $ts = time();
-      switch ($type) {
-        case 'js':
-          if (PHP5) {
-            App::import('Vendor', 'jsmin/jsmin');
-          }
-          break;
-        case 'css':
-          App::import('Vendor', 'csstidy', array('file' => 'class.csstidy.php'));
-          $tidy = new csstidy();
-          $tidy->load_template($this->options['cssCompression']);
-          break;
-      }
-
-      //merge the script
-      $scriptBuffer = '';
-      foreach($assets as $asset) {
-        $buffer = $this->__getFileContents($asset, $type);
-        $origSize = strlen($buffer);
-
-        switch ($type) {
-          case 'js':
-            //jsmin only works with PHP5
-            if (PHP5) {
-              $buffer = trim(JSMin::minify($buffer));
-            }
-            break;
-
-          case 'css':
-						if($this->options['fixCssImg']) {
+					case 'css':
+						if ($this->options['fixCssImg']) {
 							$buffer = $this->__preprocessCss($asset, $buffer);
 						}
-						
-            $tidy->parse($buffer);
-            $buffer = $tidy->print->plain();
-            break;
-        }
 
-        $delta = 0;
-        if ($origSize > 0) {
-          $delta = (strlen($buffer) / $origSize) * 100;
-        }
-        $scriptBuffer .= sprintf("/* %s.%s (%d%%) */\n", $asset['script'], $type, $delta);
-        $scriptBuffer .= $buffer . "\n\n";
-      }
+						//$tidy->parse($buffer);
+						//$buffer = $tidy->print->plain();
+						break;
+				}
 
-      //write the file
-      $fileName = $this->__generateFileName($scripts) . '_' . $ts . '.' . $type;
-      $file = new File($this->paths['wwwRoot'] . $this->options['cachePaths'][$type] . DS . $fileName);
-      $file->write(trim($scriptBuffer));
-    }
+				$delta = 0;
+				if ($origSize > 0) {
+					$delta = (strlen($buffer) / $origSize) * 100;
+				}
+				$scriptBuffer .= sprintf("/* %s.%s (%d%%) */\n", $asset['script'], $type, $delta);
+				$scriptBuffer .= $buffer . "\n\n";
+			}
 
-    if ($type == 'css') {
-      //$html->css doesn't check if the file already has
-      //the .css extension and adds it automatically, so we need to remove it.
-      $fileName = str_replace('.css', '', $fileName);
-    }
+			//write the file
+			$fileName = $this->__generateFileName($scripts) . '_' . $ts . '.' . $type;
+			$file = new File($this->paths['wwwRoot'] . $this->options['cachePaths'][$type] . DS . $fileName);
+			$file->write(trim($scriptBuffer));
+		}
 
-    return $fileName;
-  }
+		if ($type == 'css') {
+			//$html->css doesn't check if the file already has
+			//the .css extension and adds it automatically, so we need to remove it.
+			$fileName = str_replace('.css', '', $fileName);
+		}
 
-  /**
-   * Find the source file contents.  Looks in in webroot, vendors and plugins.
-   *
-   * @param string $filename
-   * @return string the full path to the file
-   * @access private
-  */
-  function __getFileContents(&$asset, $type) {
-    $assetFile = $this->__findFile($asset, $type);
+		return $fileName;
+	}
 
-    if ($assetFile) {
+	/**
+	 * Find the source file contents.  Looks in in webroot, vendors and plugins.
+	 *
+	 * @param string $filename
+	 * @return string the full path to the file
+	 * @access private
+	 */
+	function __getFileContents(&$asset, $type) {
+		$assetFile = $this->__findFile($asset, $type);
+
+		if ($assetFile) {
       if($type == 'js' && $this->Lang && strpos($assetFile, $this->Lang->paths['source']) !== false) {
-        return $this->Lang->i18n($asset['script'] . '.js');
-      } else {
-        return trim(file_get_contents($assetFile));
-      }
-    }
+				return $this->Lang->i18n($asset['script'] . '.js');
+			} else {
+				return trim(file_get_contents($assetFile));
+			}
+		}
 
-    return '';
-  }
+		return '';
+	}
 
-  function __findFile(&$asset, $type) {
-    $key = md5(serialize($asset) . $type);
-    if (!empty($this->foundFiles[$key])) {
-      return $this->foundFiles[$key];
-    }
+	function __findFile(&$asset, $type) {
+		$key = md5(serialize($asset) . $type);
+		if (!empty($this->foundFiles[$key])) {
+			return $this->foundFiles[$key];
+		}
 
-    $paths = array($this->__getPath($type));
+		$paths = array($this->__getPath($type));
 		$paths = array_merge($paths, $this->options['searchPaths']);
-		
-    
-    if (!empty($asset['plugin']) > 0) {
-      $pluginPaths = App::path('plugins');
-      $count = count($pluginPaths);
-      for ($i = 0; $i < $count; $i++) {
-        $paths[] = $pluginPaths[$i] . $asset['plugin'] . DS . 'webroot' . DS;
-      }
-    }
+		$paths[] = WWW_ROOT . $asset['plugin'] . DS;
+		$paths[] = WWW_ROOT . $asset['plugin'] . DS . $type . DS;
+		$theme = explode('/', $asset['plugin']);
+		if (count($theme) == 2) {
+			$theme = $theme[1];
+			$paths[] = VIEWS . 'themed' . DS . $theme . DS . 'webroot' . DS . $type . DS;
+		}
 
-    $assetFile = '';
-    foreach ($paths as $path) {
-      $script = sprintf('%s.%s', $asset['script'], $type);
-      if (is_file($path . $script) && file_exists($path . $script)) {
-        $assetFile = $path . $script;
-        break;
-      }
+		if (!empty($asset['plugin'])) {
+			$pluginPaths = App::path('plugins');
+			$count = count($pluginPaths);
+			for ($i = 0; $i < $count; $i++) {
+				$paths[] = $pluginPaths[$i] . $asset['plugin'] . DS . 'webroot' . DS;
+			}
+		}
 
-      if (is_file($path . $type . DS . $script) && file_exists($path . $type . DS . $script)) {
-        $assetFile = $path . $type . DS . $script;
-        break;
-      }
-    }
+		$assetFile = '';
+		$paths = array_reverse($paths);
+		foreach ($paths as $path) {
+			$script = sprintf('%s.%s', $asset['script'], $type);
+			if (is_file($path . $script) && file_exists($path . $script)) {
+				$assetFile = $path . $script;
+				break;
+			}
+
+			if (is_file($path . $type . DS . $script) && file_exists($path . $type . DS . $script)) {
+				$assetFile = $path . $type . DS . $script;
+				break;
+			}
+		}
 
     if($type == 'js' && !$assetFile && $this->Lang) {
-      $script = $this->Lang->parseFile($this->Lang->normalize($asset['script'] . '.js'));
-      if (is_file($this->Lang->paths['source'] . $script) && file_exists($this->Lang->paths['source'] . $script)) {
-        $assetFile = $this->Lang->paths['source'] . $script;
-      }
-    }
-      
-    $this->foundFiles[$key] = $assetFile;
-    return $assetFile;
-  }
+			$script = $this->Lang->parseFile($this->Lang->normalize($asset['script'] . '.js'));
+			if (is_file($this->Lang->paths['source'] . $script) && file_exists($this->Lang->paths['source'] . $script)) {
+				$assetFile = $this->Lang->paths['source'] . $script;
+			}
+		}
 
-  /**
-   * Generate the cached filename.
-   *
-   * @param array $names an array of the original file names
-   * @return string
-   * @access private
-  */
-  function __generateFileName($names) {
-    $fileName = Sanitize::paranoid(str_replace('/', '-', implode('_', $names)), array('_', '-'));
+		$this->foundFiles[$key] = $assetFile;
+		return $assetFile;
+	}
 
-    if ($this->options['md5FileName']) {
-      $fileName = md5($fileName);
-    }
+	/**
+	 * Generate the cached filename.
+	 *
+	 * @param array $names an array of the original file names
+	 * @return string
+	 * @access private
+	 */
+	function __generateFileName($names) {
+		$fileName = Sanitize::paranoid(str_replace('/', '-', implode('_', $names)), array('_', '-'));
 
-    return $fileName;
-  }
+		if ($this->options['md5FileName']) {
+			$fileName = md5($fileName);
+		}
 
-  function __getPath($type) {
-    switch ($type) {
-      case 'js':
-        return $this->paths['js'];
-      case 'css':
-        return $this->paths['css'];
-    }
+		return $fileName;
+	}
 
-    return false;
-  }
+	function __getPath($type) {
+		switch ($type) {
+			case 'js':
+				return $this->paths['js'];
+			case 'css':
+				return $this->paths['css'];
+		}
+
+		return false;
+	}
 }
 ?>
